@@ -7,4 +7,12 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 2000,
   },
+  server: {
+    proxy: {
+      "/api": {
+        target: "https://crm-dashboard-100immo.vercel.app",
+        changeOrigin: true,
+      },
+    },
+  },
 })
