@@ -684,7 +684,14 @@ export default function Dashboard() {
                   </thead>
                   <tbody>
                     {agenceData.map((a) => (
-                      <tr key={a.name} style={{ borderBottom: `1px solid ${LINE}` }}>
+                      <tr key={a.name}
+                        onClick={() => { setAgenceFilter(a.name); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                        style={{
+                          borderBottom: `1px solid ${LINE}`, cursor: "pointer",
+                          background: agenceFilter === a.name ? TEAL_SOFT : "transparent",
+                        }}
+                        onMouseEnter={(e) => { if (agenceFilter !== a.name) e.currentTarget.style.background = PAPER; }}
+                        onMouseLeave={(e) => { if (agenceFilter !== a.name) e.currentTarget.style.background = "transparent"; }}>
                         <td style={{ padding: "9px 10px", fontWeight: 600 }}>{a.name}</td>
                         <td style={{ padding: "9px 10px" }}>{fmt(a.leads)}</td>
                         <td style={{ padding: "9px 10px" }}>{fmt(a.envoyes)}</td>
@@ -698,6 +705,43 @@ export default function Dashboard() {
                 </table>
               </div>
             </Panel>
+
+            {agenceFilter !== "all" && (
+              <Panel title={`Leads de ${agenceFilter}`} subtitle={`${fmt(total)} leads filtrés`}
+                right={<button onClick={() => setAgenceFilter("all")}
+                  style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: "5px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", background: PAPER, color: SLATE }}>
+                  ✕ Effacer le filtre
+                </button>}>
+                <div style={{ overflowX: "auto", maxHeight: 420, overflowY: "auto", marginTop: 8 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${LINE}`, textAlign: "left", color: SLATE, position: "sticky", top: 0, background: PANEL }}>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Date</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Type</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Commercial</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Statut</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredRecords.slice().reverse().slice(0, 150).map((r, i) => (
+                        <tr key={i} style={{ borderBottom: `1px solid ${LINE}` }}>
+                          <td style={{ padding: "8px 10px" }}>{new Date(r.created).toLocaleDateString("fr-FR")}</td>
+                          <td style={{ padding: "8px 10px" }}>{r.type}</td>
+                          <td style={{ padding: "8px 10px" }}>{r.commercial}</td>
+                          <td style={{ padding: "8px 10px" }}>
+                            <span style={{ padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600,
+                              background: r.statut === "refus" ? "#FBE7E2" : (r.statut || "").includes("réussi") ? TEAL_SOFT : "#F1EFE7",
+                              color: r.statut === "refus" ? RED : (r.statut || "").includes("réussi") ? TEAL : SLATE }}>
+                              {STATUT_LABELS[r.statut] || r.statut || "—"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Panel>
+            )}
           </>
         ) : (
           <>
