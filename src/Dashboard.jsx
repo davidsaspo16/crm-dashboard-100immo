@@ -42,6 +42,15 @@ const DAY_LABELS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
 function fmt(n) { return new Intl.NumberFormat("fr-FR").format(n); }
 function pct(n, d) { if (!d) return "0%"; return Math.round((n / d) * 100) + "%"; }
+function fmtEUR(n) { return n == null ? "—" : new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n); }
+
+// Étape déduite des dates de progression du bien (pas de mapping de status fiable disponible)
+function propertyStage(p) {
+  if (p.dateActeAuthentique) return "vente";
+  if (p.dateCompromis) return "compromis";
+  return "mandat";
+}
+const PROPERTY_STAGE_LABELS = { mandat: "Mandat actif", compromis: "Compromis signé", vente: "Vente actée" };
 
 const LON_MIN = -5.3, LON_MAX = 9.7, LAT_MIN = 41.2, LAT_MAX = 51.3;
 const PX_PER_DEG_LAT = 46;
@@ -160,6 +169,11 @@ export default function Dashboard() {
   const [hoveredDept, setHoveredDept] = useState(null);
   const [agenceSortKey, setAgenceSortKey] = useState("leads");
   const [agenceSortDir, setAgenceSortDir] = useState("desc");
+  const [properties, setProperties] = useState([]);
+  const [propertiesLoading, setPropertiesLoading] = useState(true);
+  const [propertiesError, setPropertiesError] = useState(null);
+  const [propertiesCappedAt, setPropertiesCappedAt] = useState(null);
+  const [propAgenceFilter, setPropAgenceFilter] = useState("all");
 
   const loadLeads = useCallback(async () => {
     setLoading(true);
@@ -178,6 +192,24 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => { loadLeads(); }, [loadLeads]);
+
+  const loadProperties = useCallback(async () => {
+    setPropertiesLoading(true);
+    setPropertiesError(null);
+    try {
+      const resp = await fetch("/api/properties");
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `Requête échouée (${resp.status})`);
+      setProperties(data.properties);
+      setPropertiesCappedAt(data.cappedAt);
+    } catch (e) {
+      setPropertiesError(e.message);
+    } finally {
+      setPropertiesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadProperties(); }, [loadProperties]);
 
   const combinedRecords = records;
 
@@ -221,6 +253,43 @@ export default function Dashboard() {
     return [{ value: "all", label: `Tous les agents affiliés (${sorted.length})` },
       ...sorted.map(([name, count]) => ({ value: name, label: `${name} (${count})` }))];
   }, [combinedRecords]);
+
+  const propertiesWithStage = useMemo(() => properties.map(p => ({ ...p, stage: propertyStage(p) })), [properties]);
+
+  const propAgenceOptions = useMemo(() => {
+    const counts = {};
+    propertiesWithStage.forEach(p => { counts[p.agence] = (counts[p.agence] || 0) + 1; });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    return [{ value: "all", label: `Toutes les agences (${sorted.length})` },
+      ...sorted.map(([name, count]) => ({ value: name, label: `${name} (${count})` }))];
+  }, [propertiesWithStage]);
+
+  const filteredProperties = useMemo(() => {
+    if (propAgenceFilter === "all") return propertiesWithStage;
+    return propertiesWithStage.filter(p => p.agence === propAgenceFilter);
+  }, [propertiesWithStage, propAgenceFilter]);
+
+  const propStageCounts = useMemo(() => {
+    const c = { mandat: 0, compromis: 0, vente: 0 };
+    filteredProperties.forEach(p => { c[p.stage] += 1; });
+    return c;
+  }, [filteredProperties]);
+
+  const propVenteVolume = useMemo(() => {
+    return filteredProperties
+      .filter(p => p.stage === "vente")
+      .reduce((sum, p) => sum + (p.priceFinal || p.price || 0), 0);
+  }, [filteredProperties]);
+
+  const propAgenceData = useMemo(() => {
+    const c = {};
+    filteredProperties.forEach(p => {
+      if (!c[p.agence]) c[p.agence] = { name: p.agence, mandat: 0, compromis: 0, vente: 0, total: 0 };
+      c[p.agence][p.stage] += 1;
+      c[p.agence].total += 1;
+    });
+    return Object.values(c).sort((a, b) => b.total - a.total);
+  }, [filteredProperties]);
 
   const timeStart = timeFilter === "custom" ? new Date(customStart + "T00:00:00") : timeRangeStart(timeFilter, currentMaxDate);
   const timeEnd = timeFilter === "custom" ? new Date(customEnd + "T23:59:59") : null;
@@ -459,43 +528,72 @@ export default function Dashboard() {
           <div style={{ display: "flex", background: PAPER, border: `1px solid ${LINE}`, borderRadius: 8, padding: 3 }}>
             <button onClick={() => setView("manager")} style={{ border: "none", borderRadius: 6, padding: "7px 16px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", background: view === "manager" ? TEAL : "transparent", color: view === "manager" ? "#fff" : SLATE }}>Vue Manager</button>
             <button onClick={() => setView("agent")} style={{ border: "none", borderRadius: 6, padding: "7px 16px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", background: view === "agent" ? TEAL : "transparent", color: view === "agent" ? "#fff" : SLATE }}>Vue Agent</button>
+            <button onClick={() => setView("properties")} style={{ border: "none", borderRadius: 6, padding: "7px 16px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", background: view === "properties" ? TEAL : "transparent", color: view === "properties" ? "#fff" : SLATE }}>Mandats & Ventes</button>
           </div>
         </div>
       </div>
 
       <div style={{ padding: "20px 24px 40px", maxWidth: 1360, margin: "0 auto" }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", background: PAPER, border: `1px solid ${LINE}`, borderRadius: 8, padding: 3 }}>
-            {TIME_PRESETS.map(tp => (
-              <button key={tp.value} onClick={() => setTimeFilter(tp.value)}
-                style={{ border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 11.5, fontWeight: 600, cursor: "pointer",
-                  background: timeFilter === tp.value ? INK : "transparent", color: timeFilter === tp.value ? "#fff" : SLATE }}>
-                {tp.label}
-              </button>
-            ))}
-          </div>
-          {timeFilter === "custom" && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: 8 }}>
-              <input type="date" value={customStart} min={minDateStr} max={customEnd}
-                onChange={(e) => setCustomStart(e.target.value)}
-                style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: "5px 8px", fontSize: 12, background: PANEL, color: INK, fontFamily: "inherit" }} />
-              <span style={{ fontSize: 12, color: SLATE }}>→</span>
-              <input type="date" value={customEnd} min={customStart} max={currentMaxDateStr}
-                onChange={(e) => setCustomEnd(e.target.value)}
-                style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: "5px 8px", fontSize: 12, background: PANEL, color: INK, fontFamily: "inherit" }} />
+        {view !== "properties" && (
+          <>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", background: PAPER, border: `1px solid ${LINE}`, borderRadius: 8, padding: 3 }}>
+                {TIME_PRESETS.map(tp => (
+                  <button key={tp.value} onClick={() => setTimeFilter(tp.value)}
+                    style={{ border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 11.5, fontWeight: 600, cursor: "pointer",
+                      background: timeFilter === tp.value ? INK : "transparent", color: timeFilter === tp.value ? "#fff" : SLATE }}>
+                    {tp.label}
+                  </button>
+                ))}
+              </div>
+              {timeFilter === "custom" && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: 8 }}>
+                  <input type="date" value={customStart} min={minDateStr} max={customEnd}
+                    onChange={(e) => setCustomStart(e.target.value)}
+                    style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: "5px 8px", fontSize: 12, background: PANEL, color: INK, fontFamily: "inherit" }} />
+                  <span style={{ fontSize: 12, color: SLATE }}>→</span>
+                  <input type="date" value={customEnd} min={customStart} max={currentMaxDateStr}
+                    onChange={(e) => setCustomEnd(e.target.value)}
+                    style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: "5px 8px", fontSize: 12, background: PANEL, color: INK, fontFamily: "inherit" }} />
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
-          <Select value={typeFilter} onChange={setTypeFilter} options={typeOptions} />
-          <Select value={agenceFilter} onChange={setAgenceFilter} options={agenceOptions} style={{ maxWidth: 260 }} />
-          {view === "agent" && <Select value={selectedAgent} onChange={setSelectedAgent} options={commercials.map((c) => ({ value: c, label: c }))} />}
-          <input placeholder="Rechercher un statut…" value={search} onChange={(e) => setSearch(e.target.value)}
-            style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: "6px 10px", fontSize: 12.5, background: PANEL, color: INK, width: 200 }} />
-          <div style={{ fontSize: 11, color: SLATE, marginLeft: "auto" }}>
-            Filtres temporels calculés depuis la date la plus récente des données ({currentMaxDate.toLocaleDateString("fr-FR")})
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+              <Select value={typeFilter} onChange={setTypeFilter} options={typeOptions} />
+              <Select value={agenceFilter} onChange={setAgenceFilter} options={agenceOptions} style={{ maxWidth: 260 }} />
+              {view === "agent" && <Select value={selectedAgent} onChange={setSelectedAgent} options={commercials.map((c) => ({ value: c, label: c }))} />}
+              <input placeholder="Rechercher un statut…" value={search} onChange={(e) => setSearch(e.target.value)}
+                style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: "6px 10px", fontSize: 12.5, background: PANEL, color: INK, width: 200 }} />
+              <div style={{ fontSize: 11, color: SLATE, marginLeft: "auto" }}>
+                Filtres temporels calculés depuis la date la plus récente des données ({currentMaxDate.toLocaleDateString("fr-FR")})
+              </div>
+            </div>
+          </>
+        )}
+
+        {view === "properties" && (
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+            <Select value={propAgenceFilter} onChange={setPropAgenceFilter} options={propAgenceOptions} style={{ maxWidth: 300 }} />
+            <button onClick={loadProperties} disabled={propertiesLoading}
+              style={{
+                display: "flex", alignItems: "center", gap: 6, border: `1px solid ${LINE}`, borderRadius: 8,
+                padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: propertiesLoading ? "default" : "pointer",
+                background: propertiesLoading ? PAPER : PANEL, color: propertiesLoading ? SLATE : INK,
+              }}>
+              <span style={{ display: "inline-block", transform: propertiesLoading ? "rotate(360deg)" : "none", transition: propertiesLoading ? "transform 0.8s linear infinite" : "none" }}>⟳</span>
+              {propertiesLoading ? "Actualisation…" : "Actualiser"}
+            </button>
+            {propertiesError && <div style={{ fontSize: 11, color: RED }}>{propertiesError}</div>}
+            {propertiesCappedAt && (
+              <div style={{ fontSize: 11, color: SLATE }}>
+                ⚠ L'API MyProprio plafonne à {propertiesCappedAt} biens — il pourrait y en avoir davantage non affichés ici.
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: SLATE, marginLeft: "auto" }}>
+              Étapes déduites des dates de progression (pas de code status fourni)
+            </div>
           </div>
-        </div>
+        )}
 
         {view === "manager" ? (
           <>
@@ -743,7 +841,7 @@ export default function Dashboard() {
               </Panel>
             )}
           </>
-        ) : (
+        ) : view === "agent" ? (
           <>
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 18 }}>
               <Card label="Mes leads" value={fmt(agentPerf.leads)} sub={selectedAgent} />
@@ -797,6 +895,120 @@ export default function Dashboard() {
                             background: r.statut === "refus" ? "#FBE7E2" : (r.statut || "").includes("réussi") ? TEAL_SOFT : "#F1EFE7",
                             color: r.statut === "refus" ? RED : (r.statut || "").includes("réussi") ? TEAL : SLATE }}>
                             {STATUT_LABELS[r.statut] || r.statut || "—"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          </>
+        ) : propertiesLoading && properties.length === 0 ? (
+          <div style={{ padding: 40, textAlign: "center", color: SLATE }}>Chargement des biens depuis MyProprio…</div>
+        ) : propertiesError && properties.length === 0 ? (
+          <div style={{ padding: 40, textAlign: "center" }}>
+            <div style={{ color: RED, fontWeight: 600, marginBottom: 8 }}>Impossible de charger les biens MyProprio</div>
+            <div style={{ color: SLATE, marginBottom: 12 }}>{propertiesError}</div>
+            <button onClick={loadProperties} style={{ border: `1px solid ${LINE}`, borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", background: PANEL, color: INK }}>Réessayer</button>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 18 }}>
+              <Card label="Mandats actifs" value={fmt(propStageCounts.mandat)} sub={`sur ${fmt(filteredProperties.length)} biens`} />
+              <Card label="Compromis signés" value={fmt(propStageCounts.compromis)} sub={pct(propStageCounts.compromis, filteredProperties.length) + " des biens"} accent={GOLD} />
+              <Card label="Ventes actées" value={fmt(propStageCounts.vente)} sub={pct(propStageCounts.vente, filteredProperties.length) + " des biens"} accent={TEAL} />
+              <Card label="Taux de transformation" value={pct(propStageCounts.vente, filteredProperties.length)} sub="mandat → vente actée" accent={TEAL} />
+              <Card label="Volume vendu" value={fmtEUR(propVenteVolume)} sub={`sur ${fmt(propStageCounts.vente)} ventes actées`} accent={CLAY} />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14, marginBottom: 14 }}>
+              <Panel title="Répartition par étape" subtitle="Mandat actif → compromis signé → vente actée">
+                <ResponsiveContainer width="100%" height={140}>
+                  <BarChart data={[
+                    { stage: "Mandat actif", count: propStageCounts.mandat },
+                    { stage: "Compromis signé", count: propStageCounts.compromis },
+                    { stage: "Vente actée", count: propStageCounts.vente },
+                  ]} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={LINE} horizontal={false} />
+                    <XAxis type="number" tick={{ fontSize: 11, fill: SLATE }} axisLine={false} tickLine={false} />
+                    <YAxis type="category" dataKey="stage" width={130} tick={{ fontSize: 11, fill: INK }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: `1px solid ${LINE}` }} />
+                    <Bar dataKey="count" fill={TEAL} radius={[0, 4, 4, 0]} barSize={20} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Panel>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <Panel title="Performance par agence" subtitle={`${propAgenceData.length} agences · cliquez sur une ligne pour filtrer`}>
+                <div style={{ overflowX: "auto", maxHeight: 420, overflowY: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${LINE}`, textAlign: "left", color: SLATE, position: "sticky", top: 0, background: PANEL }}>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Agence</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Total biens</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Mandat actif</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Compromis</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Ventes</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Taux de transformation</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {propAgenceData.map((a) => (
+                        <tr key={a.name}
+                          onClick={() => { setPropAgenceFilter(a.name); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                          style={{
+                            borderBottom: `1px solid ${LINE}`, cursor: "pointer",
+                            background: propAgenceFilter === a.name ? TEAL_SOFT : "transparent",
+                          }}
+                          onMouseEnter={(e) => { if (propAgenceFilter !== a.name) e.currentTarget.style.background = PAPER; }}
+                          onMouseLeave={(e) => { if (propAgenceFilter !== a.name) e.currentTarget.style.background = "transparent"; }}>
+                          <td style={{ padding: "9px 10px", fontWeight: 600 }}>{a.name}</td>
+                          <td style={{ padding: "9px 10px" }}>{fmt(a.total)}</td>
+                          <td style={{ padding: "9px 10px" }}>{fmt(a.mandat)}</td>
+                          <td style={{ padding: "9px 10px" }}>{fmt(a.compromis)}</td>
+                          <td style={{ padding: "9px 10px" }}>{fmt(a.vente)}</td>
+                          <td style={{ padding: "9px 10px", color: TEAL, fontWeight: 600 }}>{pct(a.vente, a.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Panel>
+            </div>
+
+            <Panel title={propAgenceFilter === "all" ? "Tous les biens" : `Biens de ${propAgenceFilter}`}
+              subtitle={`${fmt(filteredProperties.length)} biens filtrés`}
+              right={propAgenceFilter !== "all" && (
+                <button onClick={() => setPropAgenceFilter("all")}
+                  style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: "5px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", background: PAPER, color: SLATE }}>
+                  ✕ Effacer le filtre
+                </button>
+              )}>
+              <div style={{ overflowX: "auto", maxHeight: 420, overflowY: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${LINE}`, textAlign: "left", color: SLATE, position: "sticky", top: 0, background: PANEL }}>
+                      <th style={{ padding: "8px 10px", fontWeight: 600 }}>Ville</th>
+                      <th style={{ padding: "8px 10px", fontWeight: 600 }}>Agence</th>
+                      <th style={{ padding: "8px 10px", fontWeight: 600 }}>Agent</th>
+                      <th style={{ padding: "8px 10px", fontWeight: 600 }}>Prix</th>
+                      <th style={{ padding: "8px 10px", fontWeight: 600 }}>Étape</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredProperties.slice(0, 200).map((p) => (
+                      <tr key={p.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+                        <td style={{ padding: "8px 10px" }}>{p.city || "—"}</td>
+                        <td style={{ padding: "8px 10px" }}>{p.agence}</td>
+                        <td style={{ padding: "8px 10px" }}>{p.agent || "—"}</td>
+                        <td style={{ padding: "8px 10px" }}>{fmtEUR(p.priceFinal || p.price)}</td>
+                        <td style={{ padding: "8px 10px" }}>
+                          <span style={{ padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600,
+                            background: p.stage === "vente" ? TEAL_SOFT : p.stage === "compromis" ? AMBER_SOFT : "#F1EFE7",
+                            color: p.stage === "vente" ? TEAL : p.stage === "compromis" ? AMBER : SLATE }}>
+                            {PROPERTY_STAGE_LABELS[p.stage]}
                           </span>
                         </td>
                       </tr>
