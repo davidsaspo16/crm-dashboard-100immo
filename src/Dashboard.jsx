@@ -281,6 +281,17 @@ export default function Dashboard() {
       .reduce((sum, p) => sum + (p.priceFinal || p.price || 0), 0);
   }, [filteredProperties]);
 
+  const propOriginCounts = useMemo(() => {
+    const c = { confirmed: 0, possible: 0, none: 0 };
+    filteredProperties.forEach(p => {
+      const conf = p.origin?.confidence;
+      if (conf === "confirmed") c.confirmed += 1;
+      else if (conf === "possible") c.possible += 1;
+      else c.none += 1;
+    });
+    return c;
+  }, [filteredProperties]);
+
   const propAgenceData = useMemo(() => {
     const c = {};
     filteredProperties.forEach(p => {
@@ -920,6 +931,10 @@ export default function Dashboard() {
               <Card label="Ventes actées" value={fmt(propStageCounts.vente)} sub={pct(propStageCounts.vente, filteredProperties.length) + " des biens"} accent={TEAL} />
               <Card label="Taux de transformation" value={pct(propStageCounts.vente, filteredProperties.length)} sub="mandat → vente actée" accent={TEAL} />
               <Card label="Volume vendu" value={fmtEUR(propVenteVolume)} sub={`sur ${fmt(propStageCounts.vente)} ventes actées`} accent={CLAY} />
+              <Card label="Issus d'un lead Airtable" value={fmt(propOriginCounts.confirmed)} sub={`+ ${fmt(propOriginCounts.possible)} correspondances incertaines`} accent={TEAL} />
+            </div>
+            <div style={{ fontSize: 11, color: SLATE, marginTop: -10, marginBottom: 14 }}>
+              ⓘ Rapprochement approximatif (nom + code postal, pas d'identifiant commun entre Airtable et MyProprio) — à prendre comme indication, pas comme certitude absolue.
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14, marginBottom: 14 }}>
@@ -995,6 +1010,7 @@ export default function Dashboard() {
                       <th style={{ padding: "8px 10px", fontWeight: 600 }}>Agent</th>
                       <th style={{ padding: "8px 10px", fontWeight: 600 }}>Prix</th>
                       <th style={{ padding: "8px 10px", fontWeight: 600 }}>Étape</th>
+                      <th style={{ padding: "8px 10px", fontWeight: 600 }}>Origine lead</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1010,6 +1026,19 @@ export default function Dashboard() {
                             color: p.stage === "vente" ? TEAL : p.stage === "compromis" ? AMBER : SLATE }}>
                             {PROPERTY_STAGE_LABELS[p.stage]}
                           </span>
+                        </td>
+                        <td style={{ padding: "8px 10px" }}>
+                          {p.origin?.confidence === "confirmed" ? (
+                            <span style={{ padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: TEAL_SOFT, color: TEAL }}>
+                              Confirmé ({p.origin.matchedName})
+                            </span>
+                          ) : p.origin?.confidence === "possible" ? (
+                            <span style={{ padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: AMBER_SOFT, color: AMBER }}>
+                              Possible ({p.origin.matchedName})
+                            </span>
+                          ) : (
+                            <span style={{ color: SLATE }}>—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
