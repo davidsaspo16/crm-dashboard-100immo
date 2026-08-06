@@ -8,6 +8,10 @@ const FIELDS = [
   "Statut du logement",
   "Commercial",
   "Agent affilié au secteur",
+  "Prénom",
+  "Nom",
+  "Numéro de téléphone",
+  "Email",
 ];
 
 function toDept(codePostal) {
@@ -68,11 +72,16 @@ export default async function handler(req, res) {
         return {
           created: f["Date"] || null,
           dept: toDept(f["Code Postal"]),
+          codePostal: f["Code Postal"] || null,
           source: f["Source du lead"] || "Non renseigné",
           statut: f["statut du lead"] || "piste",
           type: toType(f["Statut du logement"]),
           commercial: f["Commercial"] || "Non assigné",
           agence: agence ? String(agence).split(",")[0].trim() : "Non renseigné",
+          prenom: f["Prénom"] || null,
+          nom: f["Nom"] || null,
+          telephone: f["Numéro de téléphone"] || null,
+          email: f["Email"] || null,
         };
       })
       .filter((r) => r.created);

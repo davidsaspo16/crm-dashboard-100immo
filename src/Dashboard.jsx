@@ -167,6 +167,7 @@ export default function Dashboard() {
   const [lastRefreshAt, setLastRefreshAt] = useState(null);
   const [search, setSearch] = useState("");
   const [hoveredDept, setHoveredDept] = useState(null);
+  const [selectedDept, setSelectedDept] = useState(null);
   const [agenceSortKey, setAgenceSortKey] = useState("leads");
   const [agenceSortDir, setAgenceSortDir] = useState("desc");
   const [properties, setProperties] = useState([]);
@@ -429,6 +430,19 @@ export default function Dashboard() {
   }, [filteredRecords]);
   const maxDeptLeads = deptFiltered[0]?.leads || 1;
 
+  const deptSearchOptions = useMemo(() => {
+    const sorted = [...deptFiltered].sort((a, b) => a.name.localeCompare(b.name));
+    return [{ value: "", label: `Rechercher un département (${sorted.length})` },
+      ...sorted.map(d => ({ value: d.code, label: `${d.name} (${d.code}) — ${fmt(d.leads)} leads` }))];
+  }, [deptFiltered]);
+
+  const selectedDeptMeta = selectedDept ? deptFiltered.find(d => d.code === selectedDept) : null;
+
+  const deptLeads = useMemo(() => {
+    if (!selectedDept) return [];
+    return filteredRecords.filter(r => r.dept === selectedDept).slice().reverse();
+  }, [filteredRecords, selectedDept]);
+
   const heatGrid = useMemo(() => {
     const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
     filteredRecords.forEach((r) => {
@@ -657,7 +671,10 @@ export default function Dashboard() {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-              <Panel title="Carte des leads par département" subtitle={`${deptFiltered.length} départements représentés (filtres appliqués) · taille = volume`}>
+              <Panel title="Carte des leads par département" subtitle={`${deptFiltered.length} départements représentés (filtres appliqués) · taille = volume · cliquez un point ou cherchez ci-dessous`}>
+                <div style={{ marginBottom: 10 }}>
+                  <Select value={selectedDept || ""} onChange={(v) => setSelectedDept(v || null)} options={deptSearchOptions} style={{ width: "100%", maxWidth: "100%" }} />
+                </div>
                 <svg viewBox={`-10 -10 ${MAP_W+20} ${MAP_H+20}`} width="100%" height={340} style={{ overflow: "visible" }}>
                   <path d={FRANCE_PATH} fill="#EFEAE0" stroke={LINE} strokeWidth={1.5} />
                   {deptFiltered.map((d) => {
@@ -665,9 +682,14 @@ export default function Dashboard() {
                     const r = 3 + Math.sqrt(d.leads / maxDeptLeads) * 16;
                     const refusRate = d.leads ? d.refus / d.leads : 0;
                     const color = refusRate > 0.3 ? CLAY : TEAL;
+                    const isSelected = selectedDept === d.code;
                     return (
-                      <g key={d.code} onMouseEnter={() => setHoveredDept(d)} onMouseLeave={() => setHoveredDept(null)} style={{ cursor: "pointer" }}>
-                        <circle cx={x} cy={y} r={r} fill={color} fillOpacity={0.55} stroke={color} strokeWidth={1.2} />
+                      <g key={d.code}
+                        onMouseEnter={() => setHoveredDept(d)}
+                        onMouseLeave={() => setHoveredDept(null)}
+                        onClick={() => setSelectedDept(d.code)}
+                        style={{ cursor: "pointer" }}>
+                        <circle cx={x} cy={y} r={r} fill={color} fillOpacity={isSelected ? 0.9 : 0.55} stroke={isSelected ? INK : color} strokeWidth={isSelected ? 2.5 : 1.2} />
                       </g>
                     );
                   })}
@@ -675,7 +697,7 @@ export default function Dashboard() {
                 <div style={{ minHeight: 40, fontSize: 12, color: SLATE, borderTop: `1px solid ${LINE}`, paddingTop: 8, marginTop: 4 }}>
                   {hoveredDept ? (
                     <span><strong style={{ color: INK }}>{hoveredDept.name} ({hoveredDept.code})</strong> — {fmt(hoveredDept.leads)} leads, {fmt(hoveredDept.reussi)} contacts réussis, {pct(hoveredDept.refus, hoveredDept.leads)} de refus</span>
-                  ) : "Survolez un point pour le détail du département."}
+                  ) : "Survolez un point pour le détail, cliquez pour voir la liste des leads."}
                 </div>
                 <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 10.5, color: SLATE }}>
                   <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: TEAL, marginRight: 4 }} />Taux de refus &lt; 30%</span>
@@ -703,6 +725,50 @@ export default function Dashboard() {
                 <div style={{ fontSize: 11, color: SLATE, marginTop: 10 }}>Les pics se concentrent en semaine, en matinée et fin d'après-midi.</div>
               </Panel>
             </div>
+
+            {selectedDept && (
+              <div style={{ marginBottom: 14 }}>
+                <Panel title={`Leads — ${selectedDeptMeta?.name || selectedDept} (${selectedDept})`}
+                  subtitle={`${fmt(deptLeads.length)} leads avec coordonnées`}
+                  right={<button onClick={() => setSelectedDept(null)}
+                    style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: "5px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", background: PAPER, color: SLATE }}>
+                    ✕ Fermer
+                  </button>}>
+                  <div style={{ overflowX: "auto", maxHeight: 420, overflowY: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${LINE}`, textAlign: "left", color: SLATE, position: "sticky", top: 0, background: PANEL }}>
+                          <th style={{ padding: "8px 10px", fontWeight: 600 }}>Nom</th>
+                          <th style={{ padding: "8px 10px", fontWeight: 600 }}>Téléphone</th>
+                          <th style={{ padding: "8px 10px", fontWeight: 600 }}>Email</th>
+                          <th style={{ padding: "8px 10px", fontWeight: 600 }}>Code postal</th>
+                          <th style={{ padding: "8px 10px", fontWeight: 600 }}>Date</th>
+                          <th style={{ padding: "8px 10px", fontWeight: 600 }}>Statut</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {deptLeads.map((r, i) => (
+                          <tr key={i} style={{ borderBottom: `1px solid ${LINE}` }}>
+                            <td style={{ padding: "8px 10px" }}>{[r.prenom, r.nom].filter(Boolean).join(" ") || "—"}</td>
+                            <td style={{ padding: "8px 10px" }}>{r.telephone || "—"}</td>
+                            <td style={{ padding: "8px 10px" }}>{r.email || "—"}</td>
+                            <td style={{ padding: "8px 10px" }}>{r.codePostal || "—"}</td>
+                            <td style={{ padding: "8px 10px" }}>{new Date(r.created).toLocaleDateString("fr-FR")}</td>
+                            <td style={{ padding: "8px 10px" }}>
+                              <span style={{ padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600,
+                                background: r.statut === "refus" ? "#FBE7E2" : (r.statut || "").includes("réussi") ? TEAL_SOFT : "#F1EFE7",
+                                color: r.statut === "refus" ? RED : (r.statut || "").includes("réussi") ? TEAL : SLATE }}>
+                                {STATUT_LABELS[r.statut] || r.statut || "—"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Panel>
+              </div>
+            )}
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 14 }}>
               <Panel title="Répartition par source" subtitle="Donnée exacte (champ Source du lead)">
